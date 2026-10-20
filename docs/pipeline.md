@@ -8,22 +8,29 @@
 ## Що робить `pipeline/ai-review.yml`
 
 1. **Тригер — `pull_request`, не `pull_request_target`.** Workflow запускається на PR до
-   `main` (`opened`, `synchronize`, `reopened`, `ready_for_review`). `pull_request_target`
+   `main` (`opened`, `synchronize`, `reopened`, `ready_for_review`, `edited`; `edited` —
+   зміни title/body повторно запускають рев'ю). `pull_request_target`
    виконується в контексті базової гілки з секретами й токеном на запис; якщо такий
    workflow checkout-ить код PR, форк може виконати свій код із доступом до секретів.
    `pull_request` для форків дає read-only `GITHUB_TOKEN` і не передає секрети.
 2. **Детерміновані перевірки — job `tests`.** `actions/checkout@v4` без збереження
-   credentials, Node.js 22, `cd app && npm test` (`node --test`). Це обов'язковий check:
-   без зеленого `tests` PR не можна злити. Тести не доводять безпеку, але вони дешевші,
-   стабільніші й не залежать від формулювань у промпті.
+   credentials, Node.js 22. Спочатку job сканує змінені файли на секрети
+   (високосигнальні патерни) і блокує заборонені шляхи (`.env`, ключі, `review-queue/`,
+   `.github/workflows/`, `node_modules/`, ключ відповідей); будь-яке порушення валить
+   job. Потім `cd app && npm test` (`node --test`). Це обов'язковий check: без зеленого
+   `tests` PR не можна злити. Тести не доводять безпеку, але вони дешевші, стабільніші
+   й не залежать від формулювань у промпті.
 3. **AI-рев'ю — job `ai-review`, після `tests`.** `needs: tests`; job виконується лише
    для PR з цього ж репозиторію (`head.repo.full_name == github.repository`). Код PR не
    checkout-иться. Workflow бере `review/prompt.md` з **базової** гілки (`base.sha`),
    отримує diff через GitHub API, обрізає його до 60 000 символів і надсилає в
    OpenAI Chat Completions API (`OPENAI_API_KEY`, модель `vars.AI_MODEL`, за замовчуванням
-   `gpt-4o-mini`). Відповідь публікується як **дорадчий** коментар у PR; workflow не
-   ставить `request changes`, не апрувить і не зливає. Крок AI має
-   `continue-on-error: true`, тому збій API не блокує merge.
+   `gpt-4o-mini`). Якщо diff обрізано, моделі передається ознака обрізання з вимогою
+   не давати звичайний вердикт, а опублікований коментар явно позначається як
+   неповний. Звичайний вердикт — лише коли моделі доступні всі зміни. Відповідь
+   публікується як **дорадчий** коментар у PR; workflow не ставить `request changes`,
+   не апрувить і не зливає. Крок AI має `continue-on-error: true`, тому збій API не
+   блокує merge.
 4. **Злиття — людина.** Branch protection має вимагати `tests`; коментар AI — лише
    сигнал. Рішення про merge, security-рев'ю й оновлення workflow ухвалює людина.
 
